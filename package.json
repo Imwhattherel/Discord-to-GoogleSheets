@@ -1,0 +1,19 @@
+{
+  "name": "discord-gsheet-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "bot.js",
+  "scripts": {
+    "start": "bot.js"
+  },
+  "engines": {
+    "node": ">=16.6.0"
+  },
+  "author": "WhatTheReL",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.11.0",
+    "googleapis": "^131.0.0",
+    "dotenv": "^16.3.1"
+  }
+}
