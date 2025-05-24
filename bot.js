@@ -1,117 +1,234 @@
+
 require('dotenv').config();
-const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, REST, Routes } = require('discord.js');
+const {
+  Client,
+  GatewayIntentBits,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+  EmbedBuilder
+} = require('discord.js');
 const { google } = require('googleapis');
 
-
-if (!process.env.DISCORD_TOKEN) console.error('Missing DISCORD_TOKEN in .env');
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const {
+  DISCORD_TOKEN,
+  CLIENT_ID,
+  GUILD_ID,
+  SHEET_ID,
+  GOOGLE_APPLICATION_CREDENTIALS: KEYFILE
+} = process.env;
 
 
-const auth = new google.auth.GoogleAuth({
-  keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS,
-  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-});
-const sheetsAPI = google.sheets({ version: 'v4', auth });
-const SHEET_ID = process.env.SHEET_ID;
-const SHEET_NAME = 'Main';
+const commands = [
+  new SlashCommandBuilder()
+    .setName('check')
+    .setDescription('Look up an item by name (col A)')
+    .addStringOption(opt =>
+      opt.setName('name')
+         .setDescription('Name of the item')
+         .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('create')
+    .setDescription('Add a new inventory item (cols A–G)')
+    .addStringOption(opt => opt.setName('name').setDescription('Name (A)').setRequired(true))
+    .addStringOption(opt => opt.setName('description').setDescription('Description (B)').setRequired(true))
+    .addStringOption(opt =>
+      opt.setName('band')
+         .setDescription('Band (C)')
+         .setRequired(true)
+         .addChoices(
+           { name: '7/800', value: '7/800' },
+           { name: 'UHF',   value: 'UHF'   },
+           { name: 'VHF',   value: 'VHF'   },
+           { name: 'All', value: 'All' }
+         )
+    )
+    .addStringOption(opt => opt.setName('model').setDescription('Model Number (D)').setRequired(true))
+    .addStringOption(opt => opt.setName('serial').setDescription('Serial Number (E)').setRequired(true))
+    .addStringOption(opt => opt.setName('last_inv').setDescription('Last INV date (MM/DD/YYYY) (F)').setRequired(true))
+    .addStringOption(opt =>
+      opt.setName('status')
+         .setDescription('Status (G)')
+         .setRequired(true)
+         .addChoices(
+           { name: 'In Service',          value: 'In Service' },
+           { name: 'Broken',              value: 'Broken' },
+           { name: 'Sold',       value: 'Sold (Remove)' },
+           { name: 'Not in use', value: 'Not in use (acc only)' },
+           { name: 'Out Of Service',      value: 'Out Of Service' }
+         )
+    ),
+
+  new SlashCommandBuilder()
+    .setName('change_status')
+    .setDescription('Change status by serial number (col E→G)')
+    .addStringOption(opt =>
+      opt.setName('serial')
+         .setDescription('Serial Number of the item')
+         .setRequired(true))
+    .addStringOption(opt =>
+      opt.setName('status')
+         .setDescription('New status')
+         .setRequired(true)
+         .addChoices(
+           { name: 'In Service',          value: 'In Service' },
+           { name: 'Broken',              value: 'Broken' },
+           { name: 'Sold',       value: 'Sold (Remove)' },
+           { name: 'Not in use', value: 'Not in use (acc only)' },
+           { name: 'Out Of Service',      value: 'Out Of Service' }
+         )
+    ),
+
+  new SlashCommandBuilder()
+    .setName('inventory')
+    .setDescription('Set Last INV date for an item (col F)')
+    .addStringOption(opt =>
+      opt.setName('serial')
+         .setDescription('Serial Number of the item')
+         .setRequired(true))
+    .addStringOption(opt =>
+      opt.setName('date')
+         .setDescription('Last INV date (MM/DD/YYYY)')
+         .setRequired(true)),
+].map(cmd => cmd.toJSON());
 
 
-async function mainAsync() {
-  const commands = [
-    new SlashCommandBuilder()
-      .setName('check')
-      .setDescription('Check an item in inventory')
-      .addStringOption(opt => opt.setName('item').setDescription('Item name (column A)').setRequired(true)),
-    new SlashCommandBuilder()
-      .setName('create')
-      .setDescription('Create a new inventory item')
-      .addStringOption(opt => opt.setName('name').setDescription('Name (column A)').setRequired(true))
-      .addStringOption(opt => opt.setName('description').setDescription('Description (column B)').setRequired(true))
-      .addStringOption(opt => opt.setName('band').setDescription('Band (column C)').setRequired(true))
-      .addStringOption(opt => opt.setName('model_number').setDescription('Model Number (column D)').setRequired(true))
-      .addStringOption(opt => opt.setName('serial_number').setDescription('Serial Number (column E)').setRequired(true))
-      .addStringOption(opt => opt.setName('last_inv').setDescription('Last INV date (column F)').setRequired(true))
-      .addStringOption(opt => opt.setName('status').setDescription('Status (column G)').setRequired(true)),
-  ].map(cmd => cmd.toJSON());
-
-  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+client.once('ready', async () => {
+  console.log(`Logged in as ${client.user.tag}`);
+  const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
   try {
+    console.log('Registering slash commands…');
     await rest.put(
-      Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
+      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
       { body: commands }
     );
-    console.log('Registered slash commands.');
+    console.log('Slash commands registered');
   } catch (err) {
-    console.error('Error registering commands:', err);
+    console.error('Registration failed:', err);
   }
+});
+
+
+async function getSheets() {
+  const auth = new google.auth.GoogleAuth({
+    keyFile: KEYFILE,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets']
+  });
+  return google.sheets({ version: 'v4', auth: await auth.getClient() });
 }
 
-client.once('ready', () => {
-  console.log(`Logged in as ${client.user.tag}`);
-  mainAsync();
-});
 
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
+  const sheets = await getSheets();
+  const cmd = interaction.commandName;
 
-  const { commandName, options } = interaction;
-
-  if (commandName === 'check') {
-    const itemName = options.getString('item');
-    await interaction.deferReply();
-    try {
-      const res = await sheetsAPI.spreadsheets.values.get({
+  try {
+  
+    if (cmd === 'check') {
+      const name = interaction.options.getString('name');
+      const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SHEET_ID,
-        range: `${SHEET_NAME}!A2:G`,
+        range: 'Main!A2:G'
       });
       const rows = res.data.values || [];
-      const row = rows.find(r => r[0] === itemName);
-      if (!row) {
-        return interaction.editReply(`Item **${itemName}** not found.`);
+      const idx  = rows.findIndex(r => r[0] === name);
+      if (idx < 0) {
+        return interaction.reply({ content: `No item named \`${name}\`.`, ephemeral: true });
       }
-
+      const [a,b,c,d,e,f,g] = rows[idx];
       const embed = new EmbedBuilder()
-        .setTitle(`Inventory: ${row[0]}`)
+        .setTitle(`Inventory: ${a}`)
         .addFields(
-          { name: 'Description', value: row[1] || '-' },
-          { name: 'Band', value: row[2] || '-' },
-          { name: 'Model Number', value: row[3] || '-' },
-          { name: 'Serial Number', value: row[4] || '-' },
-          { name: 'Last INV', value: row[5] || '-' },
-          { name: 'Status', value: row[6] || '-' }
+          { name: 'Description',   value: b||'—', inline: true },
+          { name: 'Band',          value: c||'—', inline: true },
+          { name: 'Model Number',  value: d||'—', inline: true },
+          { name: 'Serial Number', value: e||'—', inline: true },
+          { name: 'Last INV',      value: f||'—', inline: true },
+          { name: 'Status',        value: g||'—', inline: true },
         );
-
-      interaction.editReply({ embeds: [embed] });
-    } catch (err) {
-      console.error(err);
-      interaction.editReply('Error reading sheet.');
+      return interaction.reply({ embeds: [embed] });
     }
-  }
 
-  else if (commandName === 'create') {
-    const values = [
-      options.getString('name'),
-      options.getString('description'),
-      options.getString('band'),
-      options.getString('model_number'),
-      options.getString('serial_number'),
-      options.getString('last_inv'),
-      options.getString('status'),
-    ];
-    await interaction.deferReply({ ephemeral: true });
-    try {
-      await sheetsAPI.spreadsheets.values.append({
+
+    if (cmd === 'create') {
+      const row = [
+        interaction.options.getString('name'),
+        interaction.options.getString('description'),
+        interaction.options.getString('band'),
+        interaction.options.getString('model'),
+        interaction.options.getString('serial'),
+        interaction.options.getString('last_inv'),
+        interaction.options.getString('status'),
+      ];
+      await sheets.spreadsheets.values.append({
         spreadsheetId: SHEET_ID,
-        range: `${SHEET_NAME}!A2:G2`,
-        valueInputOption: 'RAW',
-        resource: { values: [values] },
+        range: 'Main!A:G',
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [row] }
       });
-      interaction.editReply(`Created item **${values[0]}** successfully.`);
-    } catch (err) {
-      console.error(err);
-      interaction.editReply('Error writing to sheet.');
+      return interaction.reply({ content: `Created item \`${row[0]}\`.`, ephemeral: false });
+    }
+
+
+    if (cmd === 'change_status') {
+      const serial = interaction.options.getString('serial');
+      const status = interaction.options.getString('status');
+      const getRes = await sheets.spreadsheets.values.get({
+        spreadsheetId: SHEET_ID,
+        range: 'Main!E2:E'
+      });
+      const rows = getRes.data.values || [];
+      const idx  = rows.findIndex(r => r[0] === serial);
+      if (idx < 0) {
+        return interaction.reply({ content: `No item with serial \`${serial}\`.`, ephemeral: true });
+      }
+      const rowNum = idx + 2;
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SHEET_ID,
+        range: `Main!G${rowNum}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [[status]] }
+      });
+      return interaction.reply({ content: `Status for \`${serial}\` set to **${status}**.`, ephemeral: false });
+    }
+
+    
+    if (cmd === 'inventory') {
+      const serial = interaction.options.getString('serial');
+      const date   = interaction.options.getString('date');
+      await interaction.deferReply();
+
+      const getRes = await sheets.spreadsheets.values.get({
+        spreadsheetId: SHEET_ID,
+        range: 'Main!E2:E'
+      });
+      const rows = getRes.data.values || [];
+      const idx  = rows.findIndex(r => r[0] === serial);
+      if (idx < 0) {
+        return interaction.editReply(`No item with serial \`${serial}\`.`);
+      }
+      const rowNum = idx + 2;
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SHEET_ID,
+        range: `Main!F${rowNum}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [[date]] }
+      });
+      return interaction.editReply(`Last INV for \`${serial}\` set to **${date}**.`);
+    }
+
+  } catch (err) {
+    console.error('Handler error:', err);
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply('Something went wrong.');
+    } else {
+      await interaction.reply({ content: 'Something went wrong.', ephemeral: true });
     }
   }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(DISCORD_TOKEN);
